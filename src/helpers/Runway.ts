@@ -1,0 +1,85 @@
+import { ethers } from "ethers";
+import { addresses } from "../constants";
+import { IBaseAsyncThunk } from "../slices/interfaces";
+import { dai, busd, nova_dai, nova_busd, nova_bnb } from "./AllBonds";
+
+const balanceOf = {
+  inputs: [{ internalType: "address", name: "", type: "address" }],
+  name: "balanceOf",
+  outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+  stateMutability: "view",
+  type: "function",
+};
+const assetPrice = {
+  inputs: [],
+  name: "assetPrice",
+  outputs: [{ internalType: "int256", name: "", type: "int256" }],
+  stateMutability: "view",
+  type: "function",
+};
+const getTotalValue = {
+  inputs: [{ internalType: "address", name: "_pair", type: "address" }],
+  name: "getTotalValue",
+  outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+  stateMutability: "view",
+  type: "function",
+};
+const decimals = {
+  inputs: [],
+  name: "decimals",
+  outputs: [{ internalType: "uint8", name: "", type: "uint8" }],
+  stateMutability: "view",
+  type: "function",
+};
+const circulatingSupply = {
+  inputs: [],
+  name: "circulatingSupply",
+  outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+  stateMutability: "view",
+  type: "function",
+};
+const info = {
+  inputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+  name: "info",
+  outputs: [
+    { internalType: "uint256", name: "rate", type: "uint256" },
+    { internalType: "address", name: "recipient", type: "address" },
+  ],
+  stateMutability: "view",
+  type: "function",
+};
+
+export async function calcRunway(circulatingSupply: number, { networkID, provider }: IBaseAsyncThunk) {
+  const reserves = [addresses[networkID].DAI_ADDRESS, addresses[networkID].BUSD_ADDRESS];
+  const lps = [nova_dai.networkAddrs[networkID].reserveAddress, nova_busd.networkAddrs[networkID].reserveAddress, nova_bnb.networkAddrs[networkID].reserveAddress];
+  // const wftmBondContract = new ethers.Contract(eth.networkAddrs[networkID].bondAddress, [assetPrice], provider);
+  const bondCalContract = new ethers.Contract(
+    addresses[networkID].BONDINGCALC_ADDRESS as string,
+    [getTotalValue],
+    provider,
+  );
+  // const distributorContract = new ethers.Contract(addresses[networkID].DISTRIBUTOR_ADDRESS as string, [info], provider);
+  let totalValue = 0;
+  console.log("debug await stage 1");
+  for (const reserve of reserves) {
+    const reserveContract = new ethers.Contract(reserve, [balanceOf, decimals], provider);
+    const balance = await reserveContract.balanceOf(addresses[networkID].TREASURY_ADDRESS);
+    const decimal = await reserveContract.decimals();
+    // const price =
+    //   reserve == eth.networkAddrs[networkID].bondAddress ? (await wftmBondContract.assetPrice()) / 10 ** 8 : 1;
+    const price = 1;
+    const assetValue = (balance / 10 ** decimal) * price;
+
+    totalValue += assetValue;
+  }
+  console.log("debug await stage 2");
+  for (const lp of lps) {
+    console.log("debug fetching getTotalValue", lp);
+    totalValue += (await bondCalContract.getTotalValue(lp)) / 10 ** 9;
+  }
+  console.log("debug await stage 3");
+  const rebaseRate = 0.0059;
+  // const rebaseRate = (await distributorContract.info(0))[0] / 10 ** 6;
+
+  return Math.log(totalValue / circulatingSupply) / Math.log(1 + rebaseRate) / 3;
+}
